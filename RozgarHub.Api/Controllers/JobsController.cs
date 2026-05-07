@@ -63,7 +63,7 @@ public class JobsController : ControllerBase
         return job == null? NotFound(new { message = "Job not found" }) : Ok(job);
     }
 
-    // POST: api/jobs/admin - Nayi job add karo
+    // POST: api/jobs/admin
     [HttpPost("admin")]
     public async Task<IActionResult> CreateJob([FromBody] Job job)
     {
@@ -83,7 +83,7 @@ public class JobsController : ControllerBase
         return CreatedAtAction(nameof(GetBySlug), new { slug = job.Slug }, job);
     }
 
-    // DELETE: api/jobs/admin/5 - Job delete karo
+    // DELETE: api/jobs/admin/5
     [HttpDelete("admin/{id}")]
     public async Task<IActionResult> DeleteJob(int id)
     {
