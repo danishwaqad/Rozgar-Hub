@@ -1,5 +1,6 @@
 using HtmlAgilityPack;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using RozgarHub.Api.Data;
 using RozgarHub.Api.Models;
 using System.Text.Json;
@@ -34,14 +35,20 @@ public class ScraperService : IScraperService
     private readonly AppDbContext _db;
     private readonly HttpClient _http;
     private readonly ILogger<ScraperService> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public ScraperService(AppDbContext db, IHttpClientFactory httpClientFactory, ILogger<ScraperService> logger)
+    public ScraperService(
+        AppDbContext db,
+        IHttpClientFactory httpClientFactory,
+        ILogger<ScraperService> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _db = db;
         _http = httpClientFactory.CreateClient();
         _http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 RozgarHub Bot");
         _http.Timeout = TimeSpan.FromSeconds(15);
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
     public bool TryStartBackgroundRefresh(bool force = false)
@@ -54,7 +61,9 @@ public class ScraperService : IScraperService
         {
             try
             {
-                await SyncAllSources();
+                using var scope = _scopeFactory.CreateScope();
+                var scopedScraper = scope.ServiceProvider.GetRequiredService<IScraperService>();
+                await scopedScraper.SyncAllSources();
                 LastSyncUtc = DateTime.UtcNow;
             }
             catch (Exception ex)
@@ -324,6 +333,12 @@ public class ScraperService : IScraperService
 
             if (response?.Jobs == null || response.Jobs.Count == 0) return;
 
+            var existingSlugs = await _db.Jobs
+                .AsNoTracking()
+                .Where(j => j.Source == "Remotive")
+                .Select(j => j.Slug)
+                .ToListAsync();
+            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var count = 0;
             foreach (var item in response.Jobs.Take(60))
             {
@@ -331,7 +346,7 @@ public class ScraperService : IScraperService
                     continue;
 
                 var slug = $"{Slugify(item.Title)}-remotive";
-                if (await _db.Jobs.AnyAsync(j => j.Slug == slug)) continue;
+                if (!seenSlugs.Add(slug)) continue;
 
                 var location = string.IsNullOrWhiteSpace(item.CandidateRequiredLocation)
                     ? "International"
@@ -372,6 +387,7 @@ public class ScraperService : IScraperService
         }
         catch (Exception ex)
         {
+            _db.ChangeTracker.Clear();
             _logger.LogError(ex, "Remotive jobs sync failed");
         }
     }
@@ -389,6 +405,12 @@ public class ScraperService : IScraperService
 
             if (response?.Data == null || response.Data.Count == 0) return;
 
+            var existingSlugs = await _db.Jobs
+                .AsNoTracking()
+                .Where(j => j.Source == "Arbeitnow")
+                .Select(j => j.Slug)
+                .ToListAsync();
+            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var count = 0;
             foreach (var item in response.Data.Take(60))
             {
@@ -396,7 +418,7 @@ public class ScraperService : IScraperService
                     continue;
 
                 var slug = $"{Slugify(item.Title)}-arbeitnow";
-                if (await _db.Jobs.AnyAsync(j => j.Slug == slug)) continue;
+                if (!seenSlugs.Add(slug)) continue;
 
                 var location = string.IsNullOrWhiteSpace(item.Location) ? "International" : item.Location;
                 var isGulf = location.Contains("UAE", StringComparison.OrdinalIgnoreCase)
@@ -435,6 +457,7 @@ public class ScraperService : IScraperService
         }
         catch (Exception ex)
         {
+            _db.ChangeTracker.Clear();
             _logger.LogError(ex, "Arbeitnow jobs sync failed");
         }
     }
@@ -542,6 +565,12 @@ public class ScraperService : IScraperService
             var items = doc.Descendants("item").ToList();
             if (items.Count == 0) return;
 
+            var existingSlugs = await _db.Scholarships
+                .AsNoTracking()
+                .Where(s => s.Source == sourceName)
+                .Select(s => s.Slug)
+                .ToListAsync();
+            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var count = 0;
             foreach (var item in items.Take(60))
             {
@@ -553,7 +582,7 @@ public class ScraperService : IScraperService
                     continue;
 
                 var slug = $"{Slugify(title)}-{Slugify(sourceName)}";
-                if (await _db.Scholarships.AnyAsync(s => s.Slug == slug)) continue;
+                if (!seenSlugs.Add(slug)) continue;
 
                 var scholarship = new Scholarship
                 {
@@ -584,6 +613,7 @@ public class ScraperService : IScraperService
         }
         catch (Exception ex)
         {
+            _db.ChangeTracker.Clear();
             _logger.LogError(ex, "{Source} RSS sync failed", sourceName);
         }
     }
