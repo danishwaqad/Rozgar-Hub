@@ -27,6 +27,7 @@ export default function JobDetail() {
   if (!job) return <div className="max-w-4xl mx-auto p-6 py-12 text-center text-gray-600 font-medium">Job not found</div>;
 
   const isExpired = new Date(job.lastDate) < new Date();
+  const descriptionBlocks = buildDescriptionBlocks(job.description);
 
   return (
     <>
@@ -88,7 +89,17 @@ export default function JobDetail() {
 
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-gray-800 mb-4">Job Description</h2>
-            <div className="prose prose-gray max-w-none text-gray-700 whitespace-pre-line leading-relaxed">{job.description}</div>
+            <div className="space-y-4 text-gray-700 leading-8 text-[17px]">
+              {descriptionBlocks.map((block, idx) => (
+                <div key={`${idx}-${block.text.slice(0, 20)}`}>
+                  {block.isHeading ? (
+                    <h3 className="text-lg font-bold text-gray-900 mt-2">{block.text}</h3>
+                  ) : (
+                    <p>{block.text}</p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           <a 
@@ -109,4 +120,59 @@ export default function JobDetail() {
       </div>
     </>
   );
+}
+
+type DescriptionBlock = {
+  text: string;
+  isHeading: boolean;
+};
+
+function buildDescriptionBlocks(raw: string): DescriptionBlock[] {
+  const cleaned = decodeHtmlEntities(raw).replace(/\s+/g, ' ').trim();
+  if (!cleaned) return [{ text: 'No description available.', isHeading: false }];
+
+  const withSections = cleaned.replace(
+    /(Responsibilities|Requirements|Qualifications|Benefits|About the role|How to apply|What you'll do|What you’ll do)\s*:?\s*/gi,
+    '\n\n$1:\n'
+  );
+
+  let blocks = withSections
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  // If source sends one giant paragraph, split into readable sentence chunks.
+  if (blocks.length === 1 && blocks[0].length > 420) {
+    const sentences = blocks[0]
+      .split(/(?<=[.!?])\s+(?=[A-Z])/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const chunked: string[] = [];
+    for (let i = 0; i < sentences.length; i += 2) {
+      chunked.push(sentences.slice(i, i + 2).join(' '));
+    }
+    blocks = chunked.length > 0 ? chunked : blocks;
+  }
+
+  return blocks.map((block) => ({
+    text: block,
+    isHeading: isLikelyHeading(block),
+  }));
+}
+
+function isLikelyHeading(value: string): boolean {
+  const text = value.trim();
+  if (!text.endsWith(':')) return false;
+  if (text.length > 60) return false;
+  return /^[A-Za-z][A-Za-z0-9 '\-()&]+:$/.test(text);
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }
