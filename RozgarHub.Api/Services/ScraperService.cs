@@ -9,26 +9,6 @@ using System.Xml.Linq;
 
 namespace RozgarHub.Api.Services;
 
-public interface IScraperService
-{
-    Task RefreshIfNeeded(bool force = false);
-    bool TryStartBackgroundRefresh(bool force = false);
-    SyncStatus GetSyncStatus();
-    Task ScrapeFPSC();
-    Task ScrapePPSC();
-    Task ScrapeSPSC();
-    Task ScrapeKPPSC();
-    Task ScrapeNTS();
-    Task ScrapeNaukriGulf();
-    Task ScrapeHECScholarships();
-    Task ScrapeRemotiveJobs();
-    Task ScrapeArbeitnowJobs();
-    Task ScrapeRemoteOkJobs();
-    Task EnsureJobCategoryFallbacks();
-    Task EnsureScholarshipFallbacks();
-    Task SyncAllSources();
-}
-
 public class ScraperService : IScraperService
 {
     private static readonly SemaphoreSlim SyncLock = new(1, 1);
@@ -161,7 +141,11 @@ public class ScraperService : IScraperService
                     Salary = "As per Govt Scale",
                     VisaSponsored = false,
                     ApplyLink = "https://www.fpsc.gov.pk/apply",
-                    Description = $"{title} announced by Federal Public Service Commission. Last date: {lastDate:dd MMM yyyy}. Apply online at fpsc.gov.pk",
+                    Description = BuildJobDescription(
+                        title,
+                        "FPSC",
+                        $"Announced by Federal Public Service Commission. Last date: {lastDate:dd MMM yyyy}.",
+                        null),
                     Source = "FPSC",
                     PostedDate = DateTime.Now,
                     IsActive = true
@@ -239,7 +223,11 @@ public class ScraperService : IScraperService
                     Salary = "Competitive",
                     VisaSponsored = true,
                     ApplyLink = link.StartsWith("http")? link : $"https://www.naukrigulf.com{link}",
-                    Description = $"{title} at {company} in UAE. Visa sponsored. Apply via NaukriGulf.",
+                    Description = BuildJobDescription(
+                        title,
+                        "NaukriGulf",
+                        $"Role at {company} in UAE. Visa support may be offered.",
+                        null),
                     Source = "NaukriGulf",
                     PostedDate = DateTime.Now,
                     IsActive = true
@@ -334,12 +322,7 @@ public class ScraperService : IScraperService
 
             if (response?.Jobs == null || response.Jobs.Count == 0) return;
 
-            var existingSlugs = await _db.Jobs
-                .AsNoTracking()
-                .Where(j => j.Source == "Remotive")
-                .Select(j => j.Slug)
-                .ToListAsync();
-            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var seenSlugs = await GetExistingJobSlugsBySource("Remotive");
             var count = 0;
             foreach (var item in response.Jobs.Take(60))
             {
@@ -352,11 +335,7 @@ public class ScraperService : IScraperService
                 var location = string.IsNullOrWhiteSpace(item.CandidateRequiredLocation)
                     ? "International"
                     : item.CandidateRequiredLocation;
-                var isGulf = location.Contains("UAE", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Dubai", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Saudi", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Qatar", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Gulf", StringComparison.OrdinalIgnoreCase);
+                var isGulf = IsGulfLocation(location);
 
                 var job = new Job
                 {
@@ -369,9 +348,11 @@ public class ScraperService : IScraperService
                     Salary = "As per company policy",
                     VisaSponsored = isGulf,
                     ApplyLink = item.Url,
-                    Description = string.IsNullOrWhiteSpace(item.Description)
-                        ? $"{item.Title} posted on Remotive."
-                        : StripHtml(item.Description),
+                    Description = BuildJobDescription(
+                        item.Title,
+                        "Remotive",
+                        $"Remote job listed on Remotive for {(string.IsNullOrWhiteSpace(item.CompanyName) ? "Private Company" : item.CompanyName.Trim())}.",
+                        item.Description),
                     Source = "Remotive",
                     PostedDate = DateTime.Now,
                     IsActive = true
@@ -406,12 +387,7 @@ public class ScraperService : IScraperService
 
             if (response?.Data == null || response.Data.Count == 0) return;
 
-            var existingSlugs = await _db.Jobs
-                .AsNoTracking()
-                .Where(j => j.Source == "Arbeitnow")
-                .Select(j => j.Slug)
-                .ToListAsync();
-            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var seenSlugs = await GetExistingJobSlugsBySource("Arbeitnow");
             var count = 0;
             foreach (var item in response.Data.Take(60))
             {
@@ -422,11 +398,7 @@ public class ScraperService : IScraperService
                 if (!seenSlugs.Add(slug)) continue;
 
                 var location = string.IsNullOrWhiteSpace(item.Location) ? "International" : item.Location;
-                var isGulf = location.Contains("UAE", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Dubai", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Saudi", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Qatar", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Gulf", StringComparison.OrdinalIgnoreCase);
+                var isGulf = IsGulfLocation(location);
 
                 var job = new Job
                 {
@@ -439,9 +411,11 @@ public class ScraperService : IScraperService
                     Salary = "As per company policy",
                     VisaSponsored = isGulf,
                     ApplyLink = item.Url,
-                    Description = string.IsNullOrWhiteSpace(item.Description)
-                        ? $"{item.Title} posted on Arbeitnow."
-                        : StripHtml(item.Description),
+                    Description = BuildJobDescription(
+                        item.Title,
+                        "Arbeitnow",
+                        $"Remote job listed on Arbeitnow for {(string.IsNullOrWhiteSpace(item.CompanyName) ? "Private Company" : item.CompanyName.Trim())}.",
+                        item.Description),
                     Source = "Arbeitnow",
                     PostedDate = DateTime.Now,
                     IsActive = true
@@ -476,12 +450,7 @@ public class ScraperService : IScraperService
 
             if (response == null || response.Count == 0) return;
 
-            var existingSlugs = await _db.Jobs
-                .AsNoTracking()
-                .Where(j => j.Source == "RemoteOK")
-                .Select(j => j.Slug)
-                .ToListAsync();
-            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var seenSlugs = await GetExistingJobSlugsBySource("RemoteOK");
             var count = 0;
 
             foreach (var item in response.Take(100))
@@ -493,11 +462,7 @@ public class ScraperService : IScraperService
                 if (!seenSlugs.Add(slug)) continue;
 
                 var location = string.IsNullOrWhiteSpace(item.Location) ? "International" : item.Location;
-                var isGulf = location.Contains("UAE", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Dubai", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Saudi", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Qatar", StringComparison.OrdinalIgnoreCase)
-                             || location.Contains("Gulf", StringComparison.OrdinalIgnoreCase);
+                var isGulf = IsGulfLocation(location);
 
                 _db.Jobs.Add(new Job
                 {
@@ -510,9 +475,11 @@ public class ScraperService : IScraperService
                     Salary = "As per company policy",
                     VisaSponsored = isGulf,
                     ApplyLink = item.Url,
-                    Description = string.IsNullOrWhiteSpace(item.Description)
-                        ? $"{item.Position} posted on RemoteOK."
-                        : StripHtml(item.Description),
+                    Description = BuildJobDescription(
+                        item.Position,
+                        "RemoteOK",
+                        $"Remote job listed on RemoteOK for {(string.IsNullOrWhiteSpace(item.Company) ? "Remote Company" : item.Company.Trim())}.",
+                        item.Description),
                     Source = "RemoteOK",
                     PostedDate = DateTime.Now,
                     IsActive = true
@@ -608,7 +575,11 @@ public class ScraperService : IScraperService
                     Salary = "As per advertisement",
                     VisaSponsored = false,
                     ApplyLink = absoluteLink,
-                    Description = $"{title} published by {department}. Verify latest last date on official source.",
+                    Description = BuildJobDescription(
+                        title,
+                        source,
+                        $"Published by {department}. Verify latest last date on official source.",
+                        null),
                     Source = source,
                     PostedDate = DateTime.Now,
                     IsActive = true
@@ -635,12 +606,7 @@ public class ScraperService : IScraperService
             var items = doc.Descendants("item").ToList();
             if (items.Count == 0) return;
 
-            var existingSlugs = await _db.Scholarships
-                .AsNoTracking()
-                .Where(s => s.Source == sourceName)
-                .Select(s => s.Slug)
-                .ToListAsync();
-            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var seenSlugs = await GetExistingScholarshipSlugsBySource(sourceName);
             var count = 0;
             foreach (var item in items.Take(60))
             {
@@ -698,12 +664,7 @@ public class ScraperService : IScraperService
             var items = doc.Descendants("item").ToList();
             if (items.Count == 0) return;
 
-            var existingSlugs = await _db.Jobs
-                .AsNoTracking()
-                .Where(j => j.Source == sourceName)
-                .Select(j => j.Slug)
-                .ToListAsync();
-            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var seenSlugs = await GetExistingJobSlugsBySource(sourceName);
             var count = 0;
 
             foreach (var item in items.Take(80))
@@ -728,9 +689,11 @@ public class ScraperService : IScraperService
                     Salary = "As per company policy",
                     VisaSponsored = false,
                     ApplyLink = link,
-                    Description = string.IsNullOrWhiteSpace(description)
-                        ? $"{title} listed via {sourceName} feed."
-                        : StripHtml(description),
+                    Description = BuildJobDescription(
+                        title,
+                        sourceName,
+                        $"Listed via {sourceName} feed.",
+                        description),
                     Source = sourceName,
                     PostedDate = DateTime.Now,
                     IsActive = true
@@ -775,10 +738,52 @@ public class ScraperService : IScraperService
         return Regex.Replace(value.ToLower(), @"[^a-z0-9]+", "-").Trim('-');
     }
 
+    private static bool IsGulfLocation(string location)
+    {
+        return location.Contains("UAE", StringComparison.OrdinalIgnoreCase)
+               || location.Contains("Dubai", StringComparison.OrdinalIgnoreCase)
+               || location.Contains("Saudi", StringComparison.OrdinalIgnoreCase)
+               || location.Contains("Qatar", StringComparison.OrdinalIgnoreCase)
+               || location.Contains("Gulf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<HashSet<string>> GetExistingJobSlugsBySource(string source)
+    {
+        var slugs = await _db.Jobs
+            .AsNoTracking()
+            .Where(j => j.Source == source)
+            .Select(j => j.Slug)
+            .ToListAsync();
+        return slugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<HashSet<string>> GetExistingScholarshipSlugsBySource(string source)
+    {
+        var slugs = await _db.Scholarships
+            .AsNoTracking()
+            .Where(s => s.Source == source)
+            .Select(s => s.Slug)
+            .ToListAsync();
+        return slugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
     private static string StripHtml(string value)
     {
         var withoutHtml = Regex.Replace(value, "<.*?>", " ");
-        return Regex.Replace(withoutHtml, @"\s+", " ").Trim();
+        var deEntitized = HtmlEntity.DeEntitize(withoutHtml);
+        return Regex.Replace(deEntitized, @"\s+", " ").Trim();
+    }
+
+    private static string BuildJobDescription(string title, string source, string fallbackSummary, string? rawDescription)
+    {
+        var cleaned = string.IsNullOrWhiteSpace(rawDescription) ? string.Empty : StripHtml(rawDescription);
+        if (cleaned.Length > 420)
+        {
+            cleaned = $"{cleaned[..420].TrimEnd()}...";
+        }
+
+        var summary = string.IsNullOrWhiteSpace(cleaned) ? fallbackSummary : cleaned;
+        return $"{title}. {summary} Source: {source}.";
     }
 
     private async Task<string> TryGetHtmlFromUrls(params string[] urls)
@@ -1008,11 +1013,4 @@ public class ScraperService : IScraperService
         public string Url { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
     }
-}
-
-public sealed class SyncStatus
-{
-    public bool IsRunning { get; init; }
-    public DateTime? LastSyncUtc { get; init; }
-    public int CooldownSecondsRemaining { get; init; }
 }

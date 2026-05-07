@@ -1,16 +1,18 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { FaMapMarkerAlt, FaMoneyBillWave, FaCalendarAlt, FaCheckCircle, FaBuilding } from 'react-icons/fa';
 import { format } from 'date-fns';
 import type { Job } from '../types';
 
 export default function JobCard({ job }: { job: Job }) {
   const isExpired = new Date(job.lastDate) < new Date();
+  const location = useLocation();
+  const backTo = `${location.pathname}${location.search}`;
   
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-100 p-6 hover:border-green-500 hover:shadow-2xl transition-all duration-300 group hover:-translate-y-1">
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1 pr-3">
-          <Link to={`/job/${job.slug}`}>
+          <Link to={`/job/${job.slug}`} state={{ from: backTo }}>
             <h3 className="text-xl font-bold text-gray-900 group-hover:text-green-600 mb-2 line-clamp-2 leading-tight">
               {job.title}
             </h3>
@@ -57,6 +59,7 @@ export default function JobCard({ job }: { job: Job }) {
         </span>
         <Link 
           to={`/job/${job.slug}`}
+          state={{ from: backTo }}
           className="bg-gradient-to-r from-green-600 to-green-700 text-white px-5 py-2.5 rounded-xl hover:shadow-lg hover:scale-105 transition font-bold text-sm"
         >
           View Details

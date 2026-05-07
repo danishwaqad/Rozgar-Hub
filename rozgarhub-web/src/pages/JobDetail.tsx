@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { fetchJobBySlug } from '../api';
 import type { Job } from '../types';
@@ -9,8 +9,10 @@ import toast from 'react-hot-toast';
 
 export default function JobDetail() {
   const { slug } = useParams();
+  const location = useLocation();
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
+  const backTo = (location.state as { from?: string } | null)?.from || '/';
 
   useEffect(() => {
     if (slug) {
@@ -34,7 +36,7 @@ export default function JobDetail() {
       </Helmet>
 
       <div className="max-w-5xl mx-auto px-4 py-10">
-        <Link to="/" className="text-green-700 hover:text-green-800 mb-5 inline-block font-semibold">← Back to Jobs</Link>
+        <Link to={backTo} className="text-green-700 hover:text-green-800 mb-5 inline-block font-semibold">← Back to Jobs</Link>
         
         <div className="bg-white rounded-2xl border border-gray-200 p-7 md:p-9 shadow-sm">
           <div className="flex justify-between items-start mb-6">
