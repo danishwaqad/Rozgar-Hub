@@ -57,6 +57,12 @@ public class IngestionController : ControllerBase
             return Ok(new { message = "Arbeitnow sync completed" });
         }
 
+        if (normalized == "remoteok")
+        {
+            await scraperService.ScrapeRemoteOkJobs();
+            return Ok(new { message = "RemoteOK sync completed" });
+        }
+
         if (normalized == "scholarships-fallback")
         {
             await scraperService.EnsureScholarshipFallbacks();
@@ -69,6 +75,6 @@ public class IngestionController : ControllerBase
             return Ok(new { message = "Jobs category fallback sync completed" });
         }
 
-        return BadRequest(new { message = "Unknown source. Use: fpsc, naukrigulf, hec, remotive, arbeitnow, scholarships-fallback, jobs-fallback" });
+        return BadRequest(new { message = "Unknown source. Use: fpsc, naukrigulf, hec, remotive, arbeitnow, remoteok, scholarships-fallback, jobs-fallback" });
     }
 }

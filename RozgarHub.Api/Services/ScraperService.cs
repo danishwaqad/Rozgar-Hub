@@ -23,6 +23,7 @@ public interface IScraperService
     Task ScrapeHECScholarships();
     Task ScrapeRemotiveJobs();
     Task ScrapeArbeitnowJobs();
+    Task ScrapeRemoteOkJobs();
     Task EnsureJobCategoryFallbacks();
     Task EnsureScholarshipFallbacks();
     Task SyncAllSources();
@@ -462,6 +463,75 @@ public class ScraperService : IScraperService
         }
     }
 
+    public async Task ScrapeRemoteOkJobs()
+    {
+        try
+        {
+            _logger.LogInformation("Starting RemoteOK jobs sync...");
+            var payload = await _http.GetStringAsync("https://remoteok.com/api");
+            var response = JsonSerializer.Deserialize<List<RemoteOkJob>>(payload, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (response == null || response.Count == 0) return;
+
+            var existingSlugs = await _db.Jobs
+                .AsNoTracking()
+                .Where(j => j.Source == "RemoteOK")
+                .Select(j => j.Slug)
+                .ToListAsync();
+            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var count = 0;
+
+            foreach (var item in response.Take(100))
+            {
+                if (string.IsNullOrWhiteSpace(item.Position) || string.IsNullOrWhiteSpace(item.Url))
+                    continue;
+
+                var slug = $"{Slugify(item.Position)}-remoteok";
+                if (!seenSlugs.Add(slug)) continue;
+
+                var location = string.IsNullOrWhiteSpace(item.Location) ? "International" : item.Location;
+                var isGulf = location.Contains("UAE", StringComparison.OrdinalIgnoreCase)
+                             || location.Contains("Dubai", StringComparison.OrdinalIgnoreCase)
+                             || location.Contains("Saudi", StringComparison.OrdinalIgnoreCase)
+                             || location.Contains("Qatar", StringComparison.OrdinalIgnoreCase)
+                             || location.Contains("Gulf", StringComparison.OrdinalIgnoreCase);
+
+                _db.Jobs.Add(new Job
+                {
+                    Title = item.Position.Trim(),
+                    Slug = slug,
+                    Category = isGulf ? "international" : "private-pk",
+                    Country = isGulf ? "UAE" : "International",
+                    Department = string.IsNullOrWhiteSpace(item.Company) ? "Remote Company" : item.Company.Trim(),
+                    LastDate = DateTime.Now.AddDays(30),
+                    Salary = "As per company policy",
+                    VisaSponsored = isGulf,
+                    ApplyLink = item.Url,
+                    Description = string.IsNullOrWhiteSpace(item.Description)
+                        ? $"{item.Position} posted on RemoteOK."
+                        : StripHtml(item.Description),
+                    Source = "RemoteOK",
+                    PostedDate = DateTime.Now,
+                    IsActive = true
+                });
+                count++;
+            }
+
+            if (count > 0)
+                await _db.SaveChangesAsync();
+
+            _logger.LogInformation("RemoteOK sync done. {Count} new jobs added.", count);
+        }
+        catch (Exception ex)
+        {
+            _db.ChangeTracker.Clear();
+            _logger.LogError(ex, "RemoteOK jobs sync failed");
+        }
+    }
+
     private async Task ScrapeGovtPortalLinks(string url, string source, string department)
     {
         try
@@ -618,6 +688,68 @@ public class ScraperService : IScraperService
         }
     }
 
+    private async Task ScrapeJobsFromRss(string url, string sourceName, string country, string category)
+    {
+        try
+        {
+            var xml = await _http.GetStringAsync(url);
+            var doc = XDocument.Parse(xml);
+
+            var items = doc.Descendants("item").ToList();
+            if (items.Count == 0) return;
+
+            var existingSlugs = await _db.Jobs
+                .AsNoTracking()
+                .Where(j => j.Source == sourceName)
+                .Select(j => j.Slug)
+                .ToListAsync();
+            var seenSlugs = existingSlugs.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var count = 0;
+
+            foreach (var item in items.Take(80))
+            {
+                var title = item.Element("title")?.Value?.Trim();
+                var link = item.Element("link")?.Value?.Trim();
+                var description = item.Element("description")?.Value?.Trim();
+                if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(link))
+                    continue;
+
+                var slug = $"{Slugify(title)}-{Slugify(sourceName)}";
+                if (!seenSlugs.Add(slug)) continue;
+
+                _db.Jobs.Add(new Job
+                {
+                    Title = title,
+                    Slug = slug,
+                    Category = category,
+                    Country = country,
+                    Department = sourceName,
+                    LastDate = DateTime.Now.AddDays(30),
+                    Salary = "As per company policy",
+                    VisaSponsored = false,
+                    ApplyLink = link,
+                    Description = string.IsNullOrWhiteSpace(description)
+                        ? $"{title} listed via {sourceName} feed."
+                        : StripHtml(description),
+                    Source = sourceName,
+                    PostedDate = DateTime.Now,
+                    IsActive = true
+                });
+                count++;
+            }
+
+            if (count > 0)
+                await _db.SaveChangesAsync();
+
+            _logger.LogInformation("{Source} RSS jobs sync done. {Count} new jobs added.", sourceName, count);
+        }
+        catch (Exception ex)
+        {
+            _db.ChangeTracker.Clear();
+            _logger.LogError(ex, "{Source} RSS jobs sync failed", sourceName);
+        }
+    }
+
     public async Task SyncAllSources()
     {
         await ScrapeFPSC();
@@ -628,10 +760,13 @@ public class ScraperService : IScraperService
         await ScrapeNaukriGulf();
         await ScrapeRemotiveJobs();
         await ScrapeArbeitnowJobs();
+        await ScrapeRemoteOkJobs();
+        await ScrapeJobsFromRss("https://weworkremotely.com/remote-jobs.rss", "WeWorkRemotely", "International", "private-pk");
         await EnsureJobCategoryFallbacks();
         await ScrapeHECScholarships();
         await ScrapeScholarshipsFromRss("https://www.scholars4dev.com/feed/", "Scholars4Dev", "International", "Mixed");
         await ScrapeScholarshipsFromRss("https://opportunitiescorners.com/feed/", "Opportunities Corners", "International", "Mixed");
+        await ScrapeScholarshipsFromRss("https://www.afterschoolafrica.com/feed/", "AfterSchoolAfrica", "International", "Mixed");
         await EnsureScholarshipFallbacks();
     }
 
@@ -860,6 +995,15 @@ public class ScraperService : IScraperService
     {
         public string Title { get; set; } = string.Empty;
         public string CompanyName { get; set; } = string.Empty;
+        public string Location { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+    }
+
+    private sealed class RemoteOkJob
+    {
+        public string Position { get; set; } = string.Empty;
+        public string Company { get; set; } = string.Empty;
         public string Location { get; set; } = string.Empty;
         public string Url { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
