@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using RozgarHub.Api.Data;
 using RozgarHub.Api.Models;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -27,6 +29,8 @@ public class ScraperService : IScraperService
         _db = db;
         _http = httpClientFactory.CreateClient();
         _http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 RozgarHub Bot");
+        _http.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        _http.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
         _http.Timeout = TimeSpan.FromSeconds(30);
         _logger = logger;
         _scopeFactory = scopeFactory;
@@ -329,7 +333,7 @@ public class ScraperService : IScraperService
                 if (string.IsNullOrWhiteSpace(item.Title) || string.IsNullOrWhiteSpace(item.Url))
                     continue;
 
-                var slug = $"{Slugify(item.Title)}-remotive";
+                var slug = BuildExternalSlug(item.Title, "remotive", item.Url, item.CompanyName);
                 if (!seenSlugs.Add(slug)) continue;
 
                 var location = string.IsNullOrWhiteSpace(item.CandidateRequiredLocation)
@@ -394,7 +398,7 @@ public class ScraperService : IScraperService
                 if (string.IsNullOrWhiteSpace(item.Title) || string.IsNullOrWhiteSpace(item.Url))
                     continue;
 
-                var slug = $"{Slugify(item.Title)}-arbeitnow";
+                var slug = BuildExternalSlug(item.Title, "arbeitnow", item.Url, item.CompanyName);
                 if (!seenSlugs.Add(slug)) continue;
 
                 var location = string.IsNullOrWhiteSpace(item.Location) ? "International" : item.Location;
@@ -458,7 +462,7 @@ public class ScraperService : IScraperService
                 if (string.IsNullOrWhiteSpace(item.Position) || string.IsNullOrWhiteSpace(item.Url))
                     continue;
 
-                var slug = $"{Slugify(item.Position)}-remoteok";
+                var slug = BuildExternalSlug(item.Position, "remoteok", item.Url, item.Company);
                 if (!seenSlugs.Add(slug)) continue;
 
                 var location = string.IsNullOrWhiteSpace(item.Location) ? "International" : item.Location;
@@ -561,7 +565,7 @@ public class ScraperService : IScraperService
                 var absoluteLink = absoluteUri.ToString();
                 if (!seenLinks.Add(absoluteLink)) continue;
 
-                var slug = $"{Slugify(title)}-{Slugify(source)}";
+                var slug = BuildExternalSlug(title, source, absoluteLink, department);
                 if (!seenSlugs.Add(slug)) continue;
 
                 _db.Jobs.Add(new Job
@@ -617,7 +621,7 @@ public class ScraperService : IScraperService
                 if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(link))
                     continue;
 
-                var slug = $"{Slugify(title)}-{Slugify(sourceName)}";
+                var slug = BuildExternalSlug(title, sourceName, link, sourceName);
                 if (!seenSlugs.Add(slug)) continue;
 
                 var scholarship = new Scholarship
@@ -675,7 +679,7 @@ public class ScraperService : IScraperService
                 if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(link))
                     continue;
 
-                var slug = $"{Slugify(title)}-{Slugify(sourceName)}";
+                var slug = BuildExternalSlug(title, sourceName, link, sourceName);
                 if (!seenSlugs.Add(slug)) continue;
 
                 _db.Jobs.Add(new Job
@@ -736,6 +740,15 @@ public class ScraperService : IScraperService
     private static string Slugify(string value)
     {
         return Regex.Replace(value.ToLower(), @"[^a-z0-9]+", "-").Trim('-');
+    }
+
+    private static string BuildExternalSlug(string title, string source, string? url, string? secondary)
+    {
+        var basePart = Slugify($"{title}-{secondary}-{source}");
+        var urlPart = string.IsNullOrWhiteSpace(url)
+            ? Guid.NewGuid().ToString("N")[..8]
+            : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))).ToLowerInvariant()[..8];
+        return $"{basePart}-{urlPart}";
     }
 
     private static bool IsGulfLocation(string location)
