@@ -27,10 +27,11 @@ public class ScholarshipsController : ControllerBase
         [FromQuery] int page = 1)
     {
         _scraperService.TryStartBackgroundRefresh();
+        var todayUtcStart = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Utc);
 
         var query = _db.Scholarships
             .AsNoTracking()
-            .Where(s => s.IsActive && s.Deadline.Date >= DateTime.Today);
+            .Where(s => s.IsActive && s.Deadline >= todayUtcStart);
 
         if (!string.IsNullOrWhiteSpace(country))
             query = query.Where(s => s.Country == country);
@@ -76,7 +77,7 @@ public class ScholarshipsController : ControllerBase
         if (await _db.Scholarships.AnyAsync(s => s.Slug == scholarship.Slug))
             return BadRequest(new { message = "Scholarship with this slug already exists" });
 
-        scholarship.PostedDate = DateTime.Now;
+        scholarship.PostedDate = DateTime.UtcNow;
         scholarship.IsActive = true;
 
         _db.Scholarships.Add(scholarship);

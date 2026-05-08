@@ -27,10 +27,11 @@ public class JobsController : ControllerBase
         [FromQuery] int page = 1)
     {
         _scraperService.TryStartBackgroundRefresh();
+        var todayUtcStart = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Utc);
 
         var query = _db.Jobs
             .AsNoTracking()
-            .Where(j => j.IsActive && j.LastDate.Date >= DateTime.Today);
+            .Where(j => j.IsActive && j.LastDate >= todayUtcStart);
         
         if (!string.IsNullOrEmpty(category)) 
             query = query.Where(j => j.Category == category);
@@ -74,7 +75,7 @@ public class JobsController : ControllerBase
         if (await _db.Jobs.AnyAsync(j => j.Slug == job.Slug))
             return BadRequest(new { message = "Job with this slug already exists" });
 
-        job.PostedDate = DateTime.Now;
+        job.PostedDate = DateTime.UtcNow;
         job.IsActive = true;
         
         _db.Jobs.Add(job);

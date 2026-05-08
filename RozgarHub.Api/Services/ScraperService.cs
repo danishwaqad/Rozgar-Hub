@@ -27,7 +27,7 @@ public class ScraperService : IScraperService
         _db = db;
         _http = httpClientFactory.CreateClient();
         _http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 RozgarHub Bot");
-        _http.Timeout = TimeSpan.FromSeconds(15);
+        _http.Timeout = TimeSpan.FromSeconds(30);
         _logger = logger;
         _scopeFactory = scopeFactory;
     }
@@ -601,7 +601,7 @@ public class ScraperService : IScraperService
         try
         {
             var xml = await _http.GetStringAsync(url);
-            var doc = XDocument.Parse(xml);
+            var doc = XDocument.Parse(SanitizeMalformedXmlEntities(xml));
 
             var items = doc.Descendants("item").ToList();
             if (items.Count == 0) return;
@@ -659,7 +659,7 @@ public class ScraperService : IScraperService
         try
         {
             var xml = await _http.GetStringAsync(url);
-            var doc = XDocument.Parse(xml);
+            var doc = XDocument.Parse(SanitizeMalformedXmlEntities(xml));
 
             var items = doc.Descendants("item").ToList();
             if (items.Count == 0) return;
@@ -786,6 +786,15 @@ public class ScraperService : IScraperService
         return $"{title}. {summary} Source: {source}.";
     }
 
+    private static string SanitizeMalformedXmlEntities(string xml)
+    {
+        // Some feeds contain raw '&' which breaks XML parsing (EntityName error).
+        return Regex.Replace(
+            xml,
+            @"&(?!amp;|lt;|gt;|apos;|quot;|#\d+;|#x[0-9A-Fa-f]+;)",
+            "&amp;");
+    }
+
     private async Task<string> TryGetHtmlFromUrls(params string[] urls)
     {
         foreach (var url in urls)
@@ -805,7 +814,8 @@ public class ScraperService : IScraperService
 
     public async Task EnsureScholarshipFallbacks()
     {
-        var hasAnyScholarship = await _db.Scholarships.AnyAsync(s => s.IsActive && s.Deadline.Date >= DateTime.Today);
+        var todayUtcStart = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Utc);
+        var hasAnyScholarship = await _db.Scholarships.AnyAsync(s => s.IsActive && s.Deadline >= todayUtcStart);
         if (hasAnyScholarship) return;
 
         var fallbackScholarships = new List<Scholarship>
@@ -883,9 +893,9 @@ public class ScraperService : IScraperService
 
     public async Task EnsureJobCategoryFallbacks()
     {
-        var today = DateTime.Today;
-        var hasGovt = await _db.Jobs.AnyAsync(j => j.IsActive && j.LastDate.Date >= today && j.Category == "govt-pk");
-        var hasDubai = await _db.Jobs.AnyAsync(j => j.IsActive && j.LastDate.Date >= today && j.Category == "international");
+        var todayUtcStart = DateTime.SpecifyKind(DateTime.UtcNow.Date, DateTimeKind.Utc);
+        var hasGovt = await _db.Jobs.AnyAsync(j => j.IsActive && j.LastDate >= todayUtcStart && j.Category == "govt-pk");
+        var hasDubai = await _db.Jobs.AnyAsync(j => j.IsActive && j.LastDate >= todayUtcStart && j.Category == "international");
 
         if (hasGovt && hasDubai) return;
 
