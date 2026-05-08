@@ -1,5 +1,6 @@
 using HtmlAgilityPack;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using RozgarHub.Api.Data;
 using RozgarHub.Api.Models;
@@ -19,12 +20,15 @@ public class ScraperService : IScraperService
     private readonly HttpClient _http;
     private readonly ILogger<ScraperService> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly string? _proxyUrlTemplate;
+    private readonly string? _proxyApiKey;
 
     public ScraperService(
         AppDbContext db,
         IHttpClientFactory httpClientFactory,
         ILogger<ScraperService> logger,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        IConfiguration configuration)
     {
         _db = db;
         _http = httpClientFactory.CreateClient();
@@ -34,6 +38,8 @@ public class ScraperService : IScraperService
         _http.Timeout = TimeSpan.FromSeconds(30);
         _logger = logger;
         _scopeFactory = scopeFactory;
+        _proxyUrlTemplate = configuration["SCRAPER_PROXY_URL"];
+        _proxyApiKey = configuration["SCRAPER_PROXY_KEY"];
     }
 
     public bool TryStartBackgroundRefresh(bool force = false)
@@ -193,7 +199,7 @@ public class ScraperService : IScraperService
         try
         {
             _logger.LogInformation("Starting NaukriGulf scrape...");
-            var html = await _http.GetStringAsync("https://www.naukrigulf.com/pakistan-jobs");
+            var html = await GetStringForSource("https://www.naukrigulf.com/pakistan-jobs", "NaukriGulf", preferProxy: true);
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 
@@ -255,7 +261,7 @@ public class ScraperService : IScraperService
         try
         {
             _logger.LogInformation("Starting HEC scholarships scrape...");
-            var html = await _http.GetStringAsync("https://www.hec.gov.pk/english/scholarshipsgrants/pages/default.aspx");
+            var html = await GetStringForSource("https://www.hec.gov.pk/english/scholarshipsgrants/pages/default.aspx", "HEC", preferProxy: true);
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 
@@ -318,7 +324,7 @@ public class ScraperService : IScraperService
         try
         {
             _logger.LogInformation("Starting Remotive jobs sync...");
-            var payload = await _http.GetStringAsync("https://remotive.com/api/remote-jobs");
+            var payload = await GetStringForSource("https://remotive.com/api/remote-jobs", "Remotive", preferProxy: true);
             var response = JsonSerializer.Deserialize<RemotiveResponse>(payload, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -383,7 +389,7 @@ public class ScraperService : IScraperService
         try
         {
             _logger.LogInformation("Starting Arbeitnow jobs sync...");
-            var payload = await _http.GetStringAsync("https://www.arbeitnow.com/api/job-board-api");
+            var payload = await GetStringForSource("https://www.arbeitnow.com/api/job-board-api", "Arbeitnow", preferProxy: true);
             var response = JsonSerializer.Deserialize<ArbeitnowResponse>(payload, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -446,7 +452,7 @@ public class ScraperService : IScraperService
         try
         {
             _logger.LogInformation("Starting RemoteOK jobs sync...");
-            var payload = await _http.GetStringAsync("https://remoteok.com/api");
+            var payload = await GetStringForSource("https://remoteok.com/api", "RemoteOK", preferProxy: true);
             var response = JsonSerializer.Deserialize<List<RemoteOkJob>>(payload, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -508,7 +514,7 @@ public class ScraperService : IScraperService
         try
         {
             _logger.LogInformation("Starting {Source} scrape...", source);
-            var html = await _http.GetStringAsync(url);
+            var html = await GetStringForSource(url, source, preferProxy: true);
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
             var links = doc.DocumentNode.SelectNodes("//a[@href]");
@@ -604,7 +610,7 @@ public class ScraperService : IScraperService
     {
         try
         {
-            var xml = await _http.GetStringAsync(url);
+            var xml = await GetStringForSource(url, sourceName, preferProxy: true);
             var doc = XDocument.Parse(SanitizeMalformedXmlEntities(xml));
 
             var items = doc.Descendants("item").ToList();
@@ -662,7 +668,7 @@ public class ScraperService : IScraperService
     {
         try
         {
-            var xml = await _http.GetStringAsync(url);
+            var xml = await GetStringForSource(url, sourceName, preferProxy: true);
             var doc = XDocument.Parse(SanitizeMalformedXmlEntities(xml));
 
             var items = doc.Descendants("item").ToList();
@@ -814,7 +820,7 @@ public class ScraperService : IScraperService
         {
             try
             {
-                return await _http.GetStringAsync(url);
+                return await GetStringForSource(url, "FPSC", preferProxy: true);
             }
             catch
             {
@@ -823,6 +829,54 @@ public class ScraperService : IScraperService
         }
 
         throw new HttpRequestException("All source URLs failed.");
+    }
+
+    private async Task<string> GetStringForSource(string targetUrl, string source, bool preferProxy)
+    {
+        if (preferProxy && TryBuildProxyUrl(targetUrl, out var proxyUrl))
+        {
+            try
+            {
+                var proxied = await _http.GetStringAsync(proxyUrl);
+                _logger.LogInformation("{Source} fetch succeeded via proxy.", source);
+                return proxied;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "{Source} fetch via proxy failed, retrying direct.", source);
+            }
+        }
+
+        return await _http.GetStringAsync(targetUrl);
+    }
+
+    private bool TryBuildProxyUrl(string targetUrl, out string proxyUrl)
+    {
+        proxyUrl = string.Empty;
+        if (string.IsNullOrWhiteSpace(_proxyUrlTemplate))
+        {
+            return false;
+        }
+
+        var encodedTarget = Uri.EscapeDataString(targetUrl);
+        var key = _proxyApiKey ?? string.Empty;
+
+        if (_proxyUrlTemplate.Contains("{url}", StringComparison.OrdinalIgnoreCase))
+        {
+            proxyUrl = _proxyUrlTemplate
+                .Replace("{url}", encodedTarget, StringComparison.OrdinalIgnoreCase)
+                .Replace("{key}", Uri.EscapeDataString(key), StringComparison.OrdinalIgnoreCase);
+            return true;
+        }
+
+        var separator = _proxyUrlTemplate.Contains('?') ? "&" : "?";
+        proxyUrl = $"{_proxyUrlTemplate}{separator}url={encodedTarget}";
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            proxyUrl += $"&api_key={Uri.EscapeDataString(key)}";
+        }
+
+        return true;
     }
 
     public async Task EnsureScholarshipFallbacks()
