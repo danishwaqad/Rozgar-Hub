@@ -1,0 +1,16 @@
+<svg width="220" height="220" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2A1B3D"/>
+      <stop offset="100%" stop-color="#1A1127"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F4D18A"/>
+      <stop offset="100%" stop-color="#E7A74A"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="204" height="204" rx="40" fill="url(#bg)"/>
+  <rect x="8" y="8" width="204" height="204" rx="40" stroke="url(#gold)" stroke-width="4" fill="none"/>
+  <path d="M65 155V70h20l25 39 25-39h20v85h-20v-50l-23 34h-5l-22-34v50z" fill="url(#gold)"/>
+  <text x="110" y="183" text-anchor="middle" fill="#F1D5A0" font-size="16" font-family="Segoe UI, Arial, sans-serif" letter-spacing="2">MIRHA'S</text>
+</svg>
