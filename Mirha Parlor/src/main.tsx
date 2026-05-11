@@ -1,6 +1,16 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import './style.css'
+
+const navLinks = [
+  { href: '#home', label: 'Home' },
+  { href: '#services', label: 'Services' },
+  { href: '#about', label: 'About' },
+  { href: '#packages', label: 'Packages' },
+  { href: '#hours', label: 'Hours' },
+  { href: '#gallery', label: 'Gallery' },
+  { href: '#contact', label: 'Contact' },
+]
 
 const services = [
   {
@@ -79,6 +89,11 @@ const testimonials = [
     feedback:
       'Best salon experience in Khanewal for me. Great service and beautiful final look.',
   },
+  {
+    name: 'Fatima N.',
+    feedback:
+      'Bridal makeup was stunning and stayed perfect all day. Patient team and very skilled artists.',
+  },
 ]
 
 const galleryImages = [
@@ -102,15 +117,99 @@ const weekHours = [
 ]
 
 function App() {
+  const [navOpen, setNavOpen] = useState(false)
+  const [testimonialIndex, setTestimonialIndex] = useState(0)
+
+  const testimonialCount = testimonials.length
+  const goTestimonialPrev = () => {
+    setTestimonialIndex((i) => (i - 1 + testimonialCount) % testimonialCount)
+  }
+  const goTestimonialNext = () => {
+    setTestimonialIndex((i) => (i + 1) % testimonialCount)
+  }
+  const desktopTestimonials = [0, 1, 2].map(
+    (offset) => testimonials[(testimonialIndex + offset) % testimonialCount],
+  )
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 769px)')
+    const closeIfDesktop = () => {
+      if (mq.matches) setNavOpen(false)
+    }
+    mq.addEventListener('change', closeIfDesktop)
+    closeIfDesktop()
+    return () => mq.removeEventListener('change', closeIfDesktop)
+  }, [])
+
+  useEffect(() => {
+    if (navOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [navOpen])
+
   return (
     <div className="page">
+      <nav
+        className={`site-nav${navOpen ? ' site-nav--open' : ''}`}
+        aria-label="Page sections"
+      >
+        <div className="container site-nav__wrap">
+          <div className="site-nav__mobile-brand">
+            <img
+              src="/mirha-logo.svg"
+              alt=""
+              className="site-nav__mobile-logo"
+              width="32"
+              height="32"
+            />
+            <span className="site-nav__mobile-title">Mirha&apos;s Salon</span>
+          </div>
+          <button
+            type="button"
+            className="site-nav__toggle"
+            aria-expanded={navOpen}
+            aria-controls="site-nav-menu"
+            onClick={() => setNavOpen((open) => !open)}
+          >
+            <span className="visually-hidden">{navOpen ? 'Close menu' : 'Open menu'}</span>
+            <span className="site-nav__burger" aria-hidden>
+              <span />
+              <span />
+              <span />
+            </span>
+          </button>
+          <div id="site-nav-menu" className="site-nav__inner">
+            {navLinks.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                onClick={() => setNavOpen(false)}
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
+        </div>
+        {navOpen ? (
+          <div
+            className="site-nav__backdrop"
+            role="presentation"
+            onClick={() => setNavOpen(false)}
+          />
+        ) : null}
+      </nav>
       <header className="hero">
         <div className="hero__overlay" />
         <div className="container">
           <nav className="topbar">
             <div className="brand-wrap">
               <img src="/mirha-logo.svg" alt="Mirha's Salon logo" className="brand-logo" />
-              <span className="brand">MIRHA&apos;S SALON KHANEWAL</span>
+              <span className="brand">MIRHA&apos;S SALON</span>
             </div>
             <a className="topbar__cta" href="tel:+923261883327">
               Call Now
@@ -141,7 +240,7 @@ function App() {
       </header>
 
       <main>
-        <section className="section section--stats">
+        <section id="home" className="section section--stats">
           <div className="container">
             <div className="stats-grid">
               <article>
@@ -174,7 +273,7 @@ function App() {
           </div>
         </section>
 
-        <section className="section section--dark">
+        <section id="about" className="section section--dark">
           <div className="container">
             <div className="about">
               <div>
@@ -197,7 +296,7 @@ function App() {
           </div>
         </section>
 
-        <section className="section section--light">
+        <section id="packages" className="section section--light">
           <div className="container">
             <div className="section__heading">
               <h2>Popular Beauty Packages</h2>
@@ -232,24 +331,82 @@ function App() {
           </div>
         </section>
 
-        <section className="section section--dark">
+        <section id="testimonials" className="section section--dark">
           <div className="container">
             <div className="section__heading">
               <h2>What Our Clients Say</h2>
               <p>Real feedback from valued clients who trust Mirha&apos;s Salon.</p>
             </div>
-            <div className="testimonial-grid">
-              {testimonials.map((item) => (
-                <article key={item.name} className="testimonial-card">
-                  <p>&quot;{item.feedback}&quot;</p>
-                  <h3>{item.name}</h3>
-                </article>
-              ))}
+            <div
+              className="testimonial-carousel testimonial-carousel--desktop"
+              aria-roledescription="carousel"
+            >
+              <div className="testimonial-carousel__main">
+                <button
+                  type="button"
+                  className="testimonial-carousel__nav testimonial-carousel__nav--prev"
+                  onClick={goTestimonialPrev}
+                  aria-label="Previous testimonial"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M14.5 5.5 8 12l6.5 6.5" />
+                  </svg>
+                </button>
+                <div className="testimonial-carousel__track">
+                  {desktopTestimonials.map((item) => (
+                    <article key={item.name} className="testimonial-card">
+                      <p>&quot;{item.feedback}&quot;</p>
+                      <h3>{item.name}</h3>
+                    </article>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="testimonial-carousel__nav testimonial-carousel__nav--next"
+                  onClick={goTestimonialNext}
+                  aria-label="Next testimonial"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9.5 5.5 16 12l-6.5 6.5" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="testimonial-mobile-carousel">
+              <article className="testimonial-card testimonial-mobile-carousel__card">
+                <p>&quot;{testimonials[testimonialIndex].feedback}&quot;</p>
+                <h3>{testimonials[testimonialIndex].name}</h3>
+              </article>
+              <div className="testimonial-mobile-carousel__controls">
+                <button
+                  type="button"
+                  className="testimonial-carousel__nav"
+                  onClick={goTestimonialPrev}
+                  aria-label="Previous testimonial"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M14.5 5.5 8 12l6.5 6.5" />
+                  </svg>
+                </button>
+                <span className="testimonial-mobile-carousel__count">
+                  {testimonialIndex + 1} / {testimonialCount}
+                </span>
+                <button
+                  type="button"
+                  className="testimonial-carousel__nav"
+                  onClick={goTestimonialNext}
+                  aria-label="Next testimonial"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9.5 5.5 16 12l-6.5 6.5" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="section section--light">
+        <section id="gallery" className="section section--light">
           <div className="container">
             <div className="section__heading">
               <h2>Salon Gallery</h2>
